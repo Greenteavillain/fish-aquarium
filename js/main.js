@@ -7,6 +7,7 @@
 //              ?neon=1   start in neon colours      ?res=0.7  render-scale override
 //              ?streams=0..2  composition river density (0 = off, for comparison; default 1)
 //              ?seed=7   fish population seed (checks average several)
+//              ?mobile=1 / ?mobile=0  force the phone controls on / off (default: detected, see MOBILE)
 //              (debug: __fish.shares() = species share of the fish-covered screen, like checks/shares.py)
 import * as THREE from 'three';
 import { loadAll } from './loader.js';
@@ -16,12 +17,37 @@ import { makeFishMaterial, fishUniforms, setupFishLights } from './fishmat.js';
 import { FishSystem } from './fish.js';
 import { makeShaft, makeSnow, makeBubbles, bubbleAttrs } from './fx.js';
 import { SwimControls } from './controls.js';
+import { GyroLook } from './gyro.js';
+import { setupTouch } from './touch.js';
 import { installGrade, makeForward, neutral } from './grade.js';
 
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 const POSTER = params.has('poster');
 const $ = (id) => document.getElementById(id);
+
+// (mobile 10-05) user: "핸드폰 이동하면 시점 이동되게?" — friends open the link on phones.  A touch-first device
+// gets the phone mode: tilt-to-look (gyro.js), an on-screen joystick + 위로/아래로 (touch.js), a 'tap to start'
+// card, and a lighter start (fewer fish, capped pixel ratio; see MOBILE_PERF).
+// Detection: a coarse PRIMARY pointer (phones, tablets) or no hover + touch points, or a mobile UA.  WHY not
+// just maxTouchPoints: touch-screen laptops have touch points but a mouse/trackpad as the primary pointer,
+// and they must keep the desktop mouse + WASD controls.  ?mobile=1 / 0 forces it (checks, odd devices).
+const MOBILE = params.has('mobile') ? params.get('mobile') !== '0'
+  : (matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches) ||
+     /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
+// Phones: weaker GPU and CPU, and they heat up and throttle after a few minutes at full tilt.
+//  density 0.6: ambient shoals at 60 % (the per-frame CPU cost scales with simulated fish; a phone core is
+//    ~1.5-3x slower than the M4 the desktop numbers were measured on: 9.2 ms there for 38.5k fish);
+//  streams 0.8: the hero river a little thinner;  quality 0.7: start below the top, the adaptive controller
+//    earns it back if the phone is fast (it never goes above the density's population);
+//  dpr <= 1.5 and <= 2.0 MP: a 3x phone screen is 2.6-3.5 MP of fish fragments at native resolution, and on a
+//    6-inch screen 1.5x is already sharper than the fish textures;  cap 32k: smaller per-fish arrays.
+const MOBILE_PERF = { density: 0.6, streams: 0.8, quality: 0.7, dprMax: 1.5, pixelBudget: 2.0e6, cap: 32000 };
+if (MOBILE) {
+  document.body.classList.add('mobile');
+  // iOS Safari ignores user-scalable=no; its pinch arrives as gesturestart (the start card / buttons)
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+}
 
 let failed = false;
 function fail(msg) {
@@ -168,8 +194,9 @@ const speciesList = speciesJson.species.map((spec, k) => {
 // ?seed=N: another random population (default 7).  (2026-10-05) For checks: species shares measured on
 // one population swing +-2 % with where a few near fish happen to be, so tuning averages several seeds.
 const fish = new FishSystem({ species: speciesList, comp, keepouts, sandHeight: env.sandHeight,
-  seed: params.has('seed') ? (+params.get('seed') | 0) : 7 });
+  seed: params.has('seed') ? (+params.get('seed') | 0) : 7, ...(MOBILE ? { cap: MOBILE_PERF.cap } : {}) });
 if (params.has('dens')) fish.density = Math.max(0.2, Math.min(3, +params.get('dens')));
+else if (MOBILE) fish.density = MOBILE_PERF.density;
 populate(fish, comp, START.pos);
 fish.buildMeshes(scene);
 
@@ -296,10 +323,11 @@ if (comp.bubbles?.points_three?.length) {
 const controls = new SwimControls(camera, canvas, { sand: env.sandHeight, keepouts, debug: DEBUG });
 fish.camVel = controls.vel;           // fish part sideways to their motion relative to you
 resetView();
+const START_YAW = controls.yaw, START_PITCH = controls.pitch;     // '정면' on the phone faces this way again
 let neonTarget = params.has('neon') ? 1 : 0;
 fishUniforms.uNeon.value = neonTarget;
 waterUniforms.uNeonWater.value = neonTarget;
-const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), 1400); };
+const toast = (msg, ms = 1400) => { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); };
 let hudOn = DEBUG;
 const helpEl = $('help');
 let helpTimer = 0;
@@ -312,9 +340,80 @@ controls.onToggle = {
   KeyV: () => { controls.flyAlongView = !controls.flyAlongView; toast(controls.flyAlongView ? '시선 방향으로 헤엄' : '수평으로 헤엄'); },
 };
 $('hud').classList.toggle('on', hudOn);
+
+// ---------- phone mode (mobile 10-05) ----------
+// gyro look (gyro.js) on top of SwimControls, the joystick / buttons (touch.js), and a finger drag on the
+// view.  Desktop: none of this is created.
+let gyro = null, touchUI = null, wakeLock = null;
+if (MOBILE) {
+  // swim where the phone looks (incl. up/down): in a magic window you aim by pointing the phone, so the
+  // desktop's level swim (V) would ignore half of the aiming.  The 위로/아래로 buttons still rise / sink.
+  controls.flyAlongView = true;
+  gyro = new GyroLook();
+  controls.look = gyro;
+  // finger drag: 'grab the water' (the scene follows the finger, as in 360-degree photos on phones); with
+  // the gyro on it adds a turn on top of the sensor (turn round without spinning on the spot), without it
+  // it is the whole look.  WHY not the desktop drag direction (mouse right = turn right): that is mouse-look,
+  // and on a touch screen it reads as the world sliding the wrong way under the finger.
+  controls.onDragLook = (dx, dy) => {
+    if (gyro.active) { gyro.drag(dx, dy); return; }
+    controls.yaw += dx * gyro.dragK;
+    controls.pitch = Math.max(-1.45, Math.min(1.45, controls.pitch + dy * gyro.dragK));
+  };
+  let lastGyro = 'off', gyroFromButton = false;
+  gyro.onState = (st) => {
+    touchUI?.setGyro(st);
+    if (st === 'unavailable') toast('기울기 센서를 못 찾았어요 · 화면을 끌어 둘러보세요', 3200);
+    else if (st === 'denied') toast('기울기 권한이 없어요 · 화면을 끌어 둘러보세요', 3200);
+    else if (st === 'on' && (lastGyro === 'unavailable' || lastGyro === 'denied' || gyroFromButton)) toast('자이로 켬');
+    if (st !== 'waiting') gyroFromButton = false;
+    lastGyro = st;
+  };
+  touchUI = setupTouch({
+    controls,
+    onNeon: () => controls.onToggle.KeyC(),
+    onGyro: () => {
+      if (gyro.wanted && (gyro.state === 'on' || gyro.state === 'waiting')) { gyro.disable(); toast('자이로 끔 · 화면을 끌어 둘러보기', 2200); }
+      else { gyroFromButton = true; gyro.enable(); }          // inside the tap: iOS may ask again
+    },
+    onFront: () => {
+      if (gyro.active) gyro.recenter(START_YAW); else controls.turnTo(START_YAW, START_PITCH);
+      toast('정면');
+    },
+    onHome: () => controls.onToggle.KeyR(),
+  });
+  // R (a phone / tablet with a keyboard) and the 처음 button: back to the start AND facing the scene; with
+  // the gyro on, resetView's lookAt alone would be overwritten by the sensor on the next frame
+  controls.onToggle.KeyR = () => { resetView(); if (gyro.active) gyro.recenter(START_YAW); toast('처음 자리로'); };
+  // the '허용' hint only on iPhone / iPad Safari, which shows a motion-access prompt.  WHY not 'requestPermission
+  // exists': current Chrome (Android too) has the function as well and grants without asking, so the hint
+  // promised a prompt that never came.  (iPadOS reports a Mac UA: touch points tell it apart.)
+  const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  if (iOS && typeof window.DeviceOrientationEvent?.requestPermission === 'function') $('iosHint').hidden = false;
+  // Tilting the phone is not a touch: without a wake lock the screen dims after ~30 s of just looking
+  // around and then locks.  Released by the browser when the tab hides; taken again when it is back.
+  document.addEventListener('visibilitychange', () => { if (started && document.visibilityState === 'visible') keepAwake(); });
+  // iOS reports the new innerWidth/innerHeight a moment after the rotation's resize event
+  const later = () => setTimeout(resize, 250);
+  screen.orientation?.addEventListener?.('change', later);
+  addEventListener('orientationchange', later);
+}
+async function keepAwake() {
+  try { if (navigator.wakeLock && !document.hidden) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* not allowed: fine */ }
+}
+// The start tap on a phone.  gyro.enable() FIRST and synchronously: iOS shows its motion-permission prompt
+// only for a requestPermission() made inside the tap itself.
+function startMobile() {
+  gyro.enable();
+  begin();
+  touchUI.show();
+  keepAwake();
+}
+
 const startEl = $('start');
 let started = false, everLocked = false;
 startEl.addEventListener('click', async () => {
+  if (MOBILE) { startMobile(); return; }        // no pointer lock on a phone
   if (await controls.lock()) return;          // onLockChange(true) already hid the card
   // Refused.  If the lock has worked before, this is almost always Chrome's cooldown: right after
   // Esc it refuses a new lock for about a second.  WHY keep the card then: hiding it dropped you
@@ -323,7 +422,7 @@ startEl.addEventListener('click', async () => {
   if (everLocked) { toast('잠시 후 다시 클릭해 주세요'); return; }
   begin();
 });
-canvas.addEventListener('click', () => { if (!controls.locked && started) controls.lock(); });
+canvas.addEventListener('click', () => { if (!MOBILE && !controls.locked && started) controls.lock(); });
 function begin() {
   if (!started) { started = true; showHelp(8); }
   startEl.classList.add('gone');
@@ -333,7 +432,7 @@ controls.onLockChange = (locked) => {
   if (locked) { everLocked = true; begin(); }
   else if (started && !DEBUG) { startEl.classList.remove('gone'); startEl.querySelector('.go').textContent = '클릭해서 계속'; }
 };
-if (DEBUG) begin();
+if (DEBUG) { begin(); if (MOBILE) startMobile(); }
 
 // ---------- sizing / adaptive quality ----------
 // Pixel budget: cap the drawing buffer near 2560x1600 (4.1 MP); a Retina dpr 2 on a 1440p window
@@ -342,14 +441,15 @@ if (DEBUG) begin();
 let resScale = params.has('res') ? +params.get('res') : 1;
 const fixedQ = params.has('q') ? Math.max(0.2, Math.min(1, +params.get('q'))) : null;
 if (fixedQ) fish.quality = fish.qCur = fixedQ;
+else if (MOBILE) fish.quality = fish.qCur = MOBILE_PERF.quality;
 function resize() {
   const w = innerWidth, h = innerHeight;
   let cw = w, ch = h;
   if (POSTER) { ch = h; cw = Math.round(h * 2 / 3); if (cw > w) { cw = w; ch = Math.round(w * 1.5); } }
   canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
   canvas.style.left = ((w - cw) / 2) + 'px'; canvas.style.top = ((h - ch) / 2) + 'px';
-  const budget = 4.1e6;
-  const dpr = Math.min(devicePixelRatio || 1, Math.sqrt(budget / (cw * ch))) * resScale;
+  const budget = MOBILE ? MOBILE_PERF.pixelBudget : 4.1e6;
+  const dpr = Math.min(devicePixelRatio || 1, MOBILE ? MOBILE_PERF.dprMax : Infinity, Math.sqrt(budget / (cw * ch))) * resScale;
   renderer.setPixelRatio(dpr);
   renderer.setSize(cw, ch, false);
   camera.aspect = cw / ch;
@@ -453,6 +553,10 @@ function setFocal(vh) {
 // ---------- loop ----------
 const clock = { last: performance.now(), t0: performance.now() };
 function frame(now, manual = false) {
+  // (mobile 10-05) 120 / 144 Hz phones: draw every other refresh (60 / 72 fps).  Twice the frames would
+  // only heat the phone into throttling.  WHY a 9.5 ms gate and not 'one frame per 16.7 ms': on a 90 Hz
+  // screen that alternates 11 / 22 ms frames, and the adaptive controller (median frame) misreads it.
+  if (MOBILE && !manual && now - clock.last < 9.5) { requestAnimationFrame(frame); return; }
   // never negative: rAF timestamps are monotonic, but the debug step() advances the clock ahead of
   // real time, and a following rAF frame then ran the swim backwards (seen as a 36 m jump)
   const dtMs = Math.max(0, now - clock.last);
@@ -491,6 +595,7 @@ function hud() {
 // ---------- debug handle ----------
 window.__fish = {
   THREE, scene, camera, renderer, fish, controls, perf, comp, env, lights, shafts, snow, snowNear, bubbleMeshes, gradeP, envUniforms, waterUniforms, fishUniforms,
+  MOBILE, gyro, touchUI,
   get state() {
     return { fps: +perf.fps.toFixed(1), ms: +perf.ms.toFixed(2), cpuMs: +perf.cpuMs.toFixed(2), nearPx: fish.nearPx, ...fish.stats,
       quality: fish.quality, resScale, neon: fishUniforms.uNeon.value, buffer: [renderer.domElement.width, renderer.domElement.height],
@@ -906,7 +1011,7 @@ function populate(fs, comp, cam0) {
   // count and species mix.  See FishSystem.addStream for why.  Added LAST so the random sequence of
   // everything above is not disturbed by a stream change.  ?streams=0 turns them off (for
   // comparison), ?streams=0.5 halves them.
-  const sDens = params.has('streams') ? Math.max(0, Math.min(2, +params.get('streams'))) : 1;
+  const sDens = params.has('streams') ? Math.max(0, Math.min(2, +params.get('streams'))) : (MOBILE ? MOBILE_PERF.streams : 1);
   fs.streamCount = 0;
   if (sDens > 0) {
     for (const s of comp.swarms) {

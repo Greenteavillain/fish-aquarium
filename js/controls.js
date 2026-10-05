@@ -1,6 +1,10 @@
 // Swimming camera: pointer-lock mouse look + WASD with smooth acceleration/damping, collision
 // with the sand and the KEEPOUT cylinders.
 //
+// Phones (mobile 10-05): main.js feeds the on-screen joystick / up-down buttons in through stick / touchUp /
+// touchFast (same easing and collision as the keys), and gyro.js can own the view through `look`.
+// On desktop none of these is ever set, so the desktop path is the one it always was.
+//
 // Keys are read from KeyboardEvent.code, never .key: with the Korean IME active, .key for W is 'ㅈ'.
 // Sprint is Ctrl OR F: on macOS Ctrl+W is harmless, but on Windows/Linux Chrome Ctrl+W closes the
 // tab and cannot be intercepted, so F is offered as the safe alternative.
@@ -24,6 +28,17 @@ export class SwimControls {
     this.sensitivity = 0.0022;
     this.bounds = { xmin: -55, xmax: 55, zmin: -110, zmax: 40, ymax: 18 };
     this.onToggle = {};                 // code -> callback (C, H, P, R ...)
+    // (mobile 10-05) touch input: joystick (x = right, y = forward, length <= 1: a half-pushed stick swims
+    // at half speed), up/down buttons (-1..1), double-tap sprint; and an optional view source (gyro.js
+    // GyroLook) that, while .active, writes the camera's orientation itself.
+    this.stick = { x: 0, y: 0 };
+    this.touchUp = 0;
+    this.touchFast = false;
+    this.look = null;
+    this.onDragLook = null;             // (dx, dy) => void replaces the desktop drag-look (phones: 'grab' feel)
+    this._glide = null;
+    this._wasLook = false;
+    this._qE = new THREE.Quaternion();
     this._bind();
   }
 
@@ -61,7 +76,8 @@ export class SwimControls {
       // the button came up somewhere we did not hear it (a context menu ate the pointerup):
       // without this the view kept turning with a released mouse
       if (e.pointerType === 'mouse' && e.buttons === 0) { this._drag = null; return; }
-      this._look(e.clientX - this._drag.x, e.clientY - this._drag.y);
+      if (this.onDragLook) this.onDragLook(e.clientX - this._drag.x, e.clientY - this._drag.y);
+      else this._look(e.clientX - this._drag.x, e.clientY - this._drag.y);
       this._drag.x = e.clientX; this._drag.y = e.clientY;
     });
     const endDrag = (e) => { if (this._drag && e.pointerId === this._drag.id) this._drag = null; };
@@ -85,6 +101,12 @@ export class SwimControls {
     });
     window.addEventListener('blur', () => { this.keys.clear(); this._drag = null; });
     d.addEventListener('visibilitychange', () => { if (d.hidden) this.keys.clear(); });
+  }
+
+  /** (mobile 10-05) turn to yaw / pitch with a short glide (the phone's '정면' without the gyro) */
+  turnTo(yaw, pitch) {
+    this._glide = { from: this.camera.quaternion.clone(), t: 0 };
+    this.yaw = yaw; this.pitch = pitch;
   }
 
   _look(dx, dy) {
@@ -129,17 +151,31 @@ export class SwimControls {
   update(dt) {
     dt = Math.max(0, Math.min(dt, 1 / 20));
     const k = this.keys;
-    if (this.debug) {                                  // ?debug=1: arrows look (no pointer lock needed)
+    // (mobile 10-05) the gyro owns the view while it has readings: swim along where the phone looks
+    const look = this.look && this.look.active ? this.look : null;
+    if (look) {
+      look.apply(this.camera.quaternion, dt);
+      this.yaw = look.yaw;
+      this.pitch = Math.max(-1.45, Math.min(1.45, look.pitch));
+      this._wasLook = true;
+    } else if (this._wasLook) {
+      // gyro just went off: glide from the phone's last view (which may be rolled) to the level
+      // yaw / pitch view instead of snapping the roll away in one frame
+      this._wasLook = false;
+      this._glide = { from: this.camera.quaternion.clone(), t: 0 };
+    }
+    if (this.debug && !look) {                                  // ?debug=1: arrows look (no pointer lock needed)
       const r = 1.6 * dt;
       if (k.has('ArrowLeft')) this.yaw += r;
       if (k.has('ArrowRight')) this.yaw -= r;
       if (k.has('ArrowUp')) this.pitch = Math.min(1.45, this.pitch + r);
       if (k.has('ArrowDown')) this.pitch = Math.max(-1.45, this.pitch - r);
     }
-    const fwdIn = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
-    const rightIn = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
-    const upIn = (k.has('Space') || k.has('KeyE') ? 1 : 0) - (k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyQ') ? 1 : 0);
-    const fast = k.has('ControlLeft') || k.has('ControlRight') || k.has('KeyF');
+    const clamp1 = (v) => Math.max(-1, Math.min(1, v));
+    const fwdIn = clamp1((k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0) + this.stick.y);
+    const rightIn = clamp1((k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + this.stick.x);
+    const upIn = clamp1((k.has('Space') || k.has('KeyE') ? 1 : 0) - (k.has('ShiftLeft') || k.has('ShiftRight') || k.has('KeyQ') ? 1 : 0) + this.touchUp);
+    const fast = k.has('ControlLeft') || k.has('ControlRight') || k.has('KeyF') || this.touchFast;
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
     const wish = new THREE.Vector3();
     if (this.flyAlongView) {
@@ -157,6 +193,15 @@ export class SwimControls {
     const p = this.camera.position;
     p.addScaledVector(this.vel, dt);
     this._collide(p);
+    if (look) return;                   // the gyro already wrote the orientation
+    if (this._glide) {
+      this._qE.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+      const g = this._glide;
+      g.t = Math.min(1, g.t + dt / 0.4);
+      this.camera.quaternion.slerpQuaternions(g.from, this._qE, g.t * g.t * (3 - 2 * g.t));
+      if (g.t >= 1) this._glide = null;
+      return;
+    }
     this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
   }
 

@@ -2,7 +2,10 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- (mobile 10-05) viewport-fit=cover: the scene runs under the notch / home bar and the controls step in by
+     env(safe-area-inset-*); no user scaling: a pinch or double-tap zoom mid-swim left the page zoomed with
+     the joystick off-screen (iOS ignores user-scalable, so touch-action:none + gesturestart do it there). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>바닷속 물고기</title>
 <meta name="description" content="수천 마리 물고기 떼 속을 헤엄쳐 다니는 바닷속 장면">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c5-7 13-8 19-3l5-4v14l-5-4c-6 5-14 4-19-3z' fill='%23ffb020'/%3E%3C/svg%3E">
@@ -64,6 +67,68 @@
     text-decoration: none; padding: 2px 8px; border-radius: 8px; background: rgba(6, 30, 36, .35); }
   #credits:hover { color: var(--fg); }
   @media (max-width: 520px) { .keys { font-size: 12px; } #help { left: 16px; right: 16px; bottom: 16px; } }
+
+  /* ---------- phones / tablets (mobile 10-05) ----------
+     body.mobile is set by main.js for a touch-first device (coarse pointer).  Desktop never gets the class,
+     so none of this applies there.  The page must never scroll, zoom, select text or pop the long-press
+     callout: every finger on it is a control. */
+  .only-mobile { display: none; }
+  body.mobile .only-mobile { display: block; }
+  body.mobile .keys.only-mobile { display: grid; }   /* (.only-mobile's block would undo the key grid) */
+  body.mobile .only-desk { display: none; }
+  body.mobile { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent; overscroll-behavior: none; touch-action: none; }
+  body.mobile #start .card { width: min(360px, calc(100vw - 32px)); }
+  body.mobile #start .hint { color: var(--dim); font-size: 14px; line-height: 1.6; }
+  body.mobile #start .ios { margin-top: 8px; font-size: 12px; color: var(--dim); }
+  /* help sits under the button row (the joystick owns the bottom-left corner) */
+  body.mobile #help { left: calc(16px + env(safe-area-inset-left)); right: auto; bottom: auto;
+    top: calc(68px + env(safe-area-inset-top)); max-width: min(330px, calc(100vw - 32px));
+    pointer-events: none; }   /* (QA 10-05) text only: for its 8 s a drag starting on it must still turn the view */
+  body.mobile #toast { top: auto; bottom: calc(176px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px);
+    box-sizing: border-box; text-align: center; }
+  body.mobile #hud { top: calc(68px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right)); }
+  body.mobile #credits { right: auto; bottom: auto; left: calc(10px + env(safe-area-inset-left));
+    top: calc(12px + env(safe-area-inset-top)); padding: 12px 10px; line-height: 20px; min-width: 44px;
+    box-sizing: border-box; text-align: center; }
+
+  #touchUI { display: none; }
+  body.mobile #touchUI.on { display: block; }
+  #touchUI .ctl { position: fixed; z-index: 11; touch-action: none; -webkit-user-select: none; user-select: none; }
+  /* joystick: 136 px ring (a thumb is ~45-57 px wide), knob 56 px; the knob travels 46 px (touch.js) */
+  #stick { left: calc(18px + env(safe-area-inset-left)); bottom: calc(22px + env(safe-area-inset-bottom));
+    width: 136px; height: 136px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(6, 30, 36, .26); border: 2px solid rgba(238, 247, 247, .38); box-sizing: border-box; }
+  #stick .knob { width: 56px; height: 56px; border-radius: 50%; background: rgba(238, 247, 247, .55);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, .25); pointer-events: none; }
+  #stick.on { background: rgba(6, 30, 36, .36); }
+  #stick.on .knob { background: rgba(238, 247, 247, .8); }
+  #stick.fast { border-color: var(--accent); }
+  #stick.fast .knob { background: var(--accent); }
+  /* 위로 / 아래로: 64 px round buttons stacked at the bottom-right, held to rise / sink */
+  .vbtn { right: calc(18px + env(safe-area-inset-right)); width: 64px; height: 64px; border-radius: 50%;
+    border: 2px solid rgba(238, 247, 247, .38); background: rgba(6, 30, 36, .3); color: var(--fg);
+    font-family: inherit; font-weight: 600; font-size: 12px; line-height: 1.1; display: grid; place-items: center; align-content: center; gap: 2px; padding: 0; }
+  .vbtn svg { width: 20px; height: 20px; }
+  #tUp { bottom: calc(100px + env(safe-area-inset-bottom)); }
+  #tDown { bottom: calc(22px + env(safe-area-inset-bottom)); }
+  .vbtn.on { background: rgba(255, 207, 58, .55); border-color: var(--accent); color: #102a30; }
+  /* the button row: 44 px tall pills, top-right */
+  .tbar { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+    display: flex; gap: 6px; }
+  .pill { height: 44px; min-width: 52px; padding: 0 12px; border-radius: 22px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--fg); font-family: inherit; font-weight: 600; font-size: 13px; line-height: 1; -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px); }
+  .pill:active { background: rgba(6, 30, 36, .8); }
+  #tGyro[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .pill.dim { opacity: .5; }
+  /* landscape phone (~375-430 px tall): the toast would land on the help panel; put it at the bottom
+     between the joystick and the 위로/아래로 column instead */
+  @media (orientation: landscape) and (max-height: 520px) {
+    body.mobile #toast { bottom: calc(24px + env(safe-area-inset-bottom)); max-width: calc(100vw - 360px); }
+  }
+  /* a narrow phone in portrait: tighter pills so four fit beside the 출처 link (320 px wide phones) */
+  @media (max-width: 370px) { .pill { padding: 0 9px; min-width: 46px; font-size: 12px; } .tbar { gap: 4px; } }
 </style>
 <script type="importmap">
 {
@@ -88,8 +153,13 @@
 
 <div id="start" class="gone">
   <div class="card panel">
-    <div class="go">클릭해서 시작</div>
-    <div class="keys">
+    <div class="go only-desk">클릭해서 시작</div>
+    <div class="go only-mobile">탭해서 시작</div>
+    <!-- (mobile 10-05) phones: the gyro look + joystick; the iOS line only where Safari will ask for
+         motion access (main.js shows it when DeviceOrientationEvent.requestPermission exists) -->
+    <div class="hint only-mobile">폰을 움직여 둘러보기 · 왼쪽 조이스틱으로 헤엄</div>
+    <div class="ios" id="iosHint" hidden>다음 창에서 ‘허용’을 눌러 주세요</div>
+    <div class="keys only-desk">
       <b>마우스</b><span>둘러보기</span>
       <b>W A S D</b><span>헤엄치기</span>
       <b>Space · Shift</b><span>위 · 아래</span>
@@ -98,7 +168,13 @@
 </div>
 
 <div id="help" class="panel faded">
-  <div class="keys">
+  <div class="keys only-mobile">
+    <b>폰 움직이기</b><span>둘러보기</span>
+    <b>화면 끌기</b><span>방향 돌리기</span>
+    <b>조이스틱</b><span>헤엄 (두 번 톡 → 빠르게)</span>
+    <b>위로 · 아래로</b><span>누르고 있기</span>
+  </div>
+  <div class="keys only-desk">
     <b>마우스</b><span>둘러보기 (Esc: 마우스 풀기)</span>
     <b>W A S D</b><span>헤엄치기</span>
     <b>Space / E</b><span>위로</span>
@@ -110,6 +186,18 @@
   </div>
 </div>
 
+<!-- (mobile 10-05) phone controls, shown after the start tap on touch devices (js/touch.js) -->
+<div id="touchUI">
+  <div id="stick" class="ctl" aria-label="헤엄 조이스틱"><div class="knob"></div></div>
+  <button id="tUp" class="ctl vbtn" aria-label="위로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>위로</button>
+  <button id="tDown" class="ctl vbtn" aria-label="아래로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>아래로</button>
+  <div class="ctl tbar">
+    <button id="tNeon" class="pill">네온</button>
+    <button id="tGyro" class="pill" aria-pressed="false">자이로</button>
+    <button id="tFront" class="pill">정면</button>
+    <button id="tHome" class="pill">처음</button>
+  </div>
+</div>
 <div id="hud" class="panel"></div>
 <div id="toast" class="panel"></div>
 <div id="cross"></div>

@@ -44,7 +44,7 @@ function mulberry32(seed) {
 const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 
 export class FishSystem {
-  constructor({ species, comp, keepouts, sandHeight, seed = 7 }) {
+  constructor({ species, comp, keepouts, sandHeight, seed = 7, cap = 48000 }) {
     this.species = species;           // [{spec, id, k, swim, mat, geoNear, geoFar}]
     this.byId = Object.fromEntries(species.map((s) => [s.id, s]));
     this.comp = comp;
@@ -55,7 +55,9 @@ export class FishSystem {
     this.sand = sandHeight;
     this.rng = mulberry32(seed);
     this.N = 0;
-    this.cap = 48000;           // ambient ~24.7k + composition streams ~10.3k + world-fixed ~1.5k (2026-10-05: 36.5k)
+    // ambient ~24.7k + composition streams ~10.3k + world-fixed ~1.5k (2026-10-05: 36.5k).  (mobile 10-05) phones
+    // pass 32k: their population is ~24k (main.js MOBILE_PERF) and every slot costs ~180 bytes of arrays
+    this.cap = cap;
     this.density = 1;           // multiplies every ambient layer's count (main.js; ?dens= for tests)
     this.layers = [];
     this.alloc(this.cap);
