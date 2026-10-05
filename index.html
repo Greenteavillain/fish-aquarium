@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>바닷속 물고기</title>
+<meta name="description" content="수천 마리 물고기 떼 속을 헤엄쳐 다니는 바닷속 장면">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c5-7 13-8 19-3l5-4v14l-5-4c-6 5-14 4-19-3z' fill='%23ffb020'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --fg: #eef7f7; --dim: rgba(238, 247, 247, .72); --panel: rgba(6, 30, 36, .62);
+    --line: rgba(190, 240, 240, .22); --accent: #ffcf3a; --bg: #0c3a44;
+  }
+  /* The page is one full-screen WebGL view; the overlays sit on dark translucent panels in both
+     colour schemes, so the tokens are the same for light and dark (the scene itself is the theme). */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0c3a44; } }
+  :root[data-theme="dark"] { --bg: #0c3a44; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif; }
+  canvas#view { display: block; position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+  /* (frutiger 10-05) the loading screen follows the scene's brighter Frutiger-Aero water (sky-blue near the
+     surface, turquoise below) instead of the old deep teal; the text area (centre) stays dark enough for the
+     white text (~#187590 there vs white ~5:1). */
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 30;
+    background: radial-gradient(120% 90% at 50% 0%, #7fd6ef 0%, #36a9c9 22%, #1b7f9c 45%, #0d5469 100%);
+    transition: opacity .8s ease; }
+  #loading.gone { opacity: 0; pointer-events: none; }
+  #loading .box { width: min(360px, calc(100vw - 32px)); text-align: center; }
+  #loading h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; letter-spacing: .02em; }
+  #loading p { margin: 0 0 16px; color: var(--dim); }
+  .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+  #loadMsg { margin-top: 10px; font-size: 12px; color: var(--dim); min-height: 18px; }
+  #loading.error .bar { display: none; }
+  #loading.error #loadMsg { color: #ffd0c8; font-size: 14px; }
+
+  #start { position: fixed; inset: 0; display: grid; place-items: center; z-index: 20; cursor: pointer;
+    transition: opacity .5s ease; }
+  #start.gone { opacity: 0; pointer-events: none; }
+  #start .card { padding: 18px 22px; text-align: center; width: min(420px, calc(100vw - 32px)); box-sizing: border-box; }
+  #start .go { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+  #start .keys { grid-template-columns: auto auto; justify-content: center; text-align: left; }
+
+  #help { position: fixed; left: 16px; bottom: 16px; z-index: 10; padding: 12px 14px; max-width: calc(100vw - 32px);
+    box-sizing: border-box; transition: opacity .9s ease; }
+  #help.faded { opacity: 0; pointer-events: none; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .keys b { font-weight: 600; color: var(--accent); white-space: nowrap; }
+  .keys span { color: var(--fg); }
+
+  #hud { position: fixed; right: 16px; top: 16px; z-index: 10; padding: 8px 10px; display: none;
+    font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; }
+  #hud.on { display: block; }
+  #toast { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 12; padding: 6px 14px;
+    opacity: 0; transition: opacity .3s ease; pointer-events: none; font-size: 14px; }
+  #toast.on { opacity: 1; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 2px;
+    background: rgba(255,255,255,.55); z-index: 5; display: none; }
+  body.locked #cross { display: block; }
+  #credits { position: fixed; right: 12px; bottom: 10px; z-index: 11; font-size: 12px; color: var(--dim);
+    text-decoration: none; padding: 2px 8px; border-radius: 8px; background: rgba(6, 30, 36, .35); }
+  #credits:hover { color: var(--fg); }
+  @media (max-width: 520px) { .keys { font-size: 12px; } #help { left: 16px; right: 16px; bottom: 16px; } }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<div id="loading">
+  <div class="box">
+    <h1>바닷속으로 들어가는 중</h1>
+    <p>물고기 38종과 바위, 모래를 불러오고 있어요</p>
+    <div class="bar"><i id="loadBar"></i></div>
+    <div id="loadMsg">준비 중…</div>
+  </div>
+</div>
+
+<div id="start" class="gone">
+  <div class="card panel">
+    <div class="go">클릭해서 시작</div>
+    <div class="keys">
+      <b>마우스</b><span>둘러보기</span>
+      <b>W A S D</b><span>헤엄치기</span>
+      <b>Space · Shift</b><span>위 · 아래</span>
+    </div>
+  </div>
+</div>
+
+<div id="help" class="panel faded">
+  <div class="keys">
+    <b>마우스</b><span>둘러보기 (Esc: 마우스 풀기)</span>
+    <b>W A S D</b><span>헤엄치기</span>
+    <b>Space / E</b><span>위로</span>
+    <b>Shift / Q</b><span>아래로</span>
+    <b>Ctrl / F</b><span>누르고 있으면 빠르게</span>
+    <b>V</b><span>시선 방향으로 헤엄 켜기/끄기</span>
+    <b>C</b><span>네온 색 ↔ 자연 색</span>
+    <b>H · P · R</b><span>도움말 · 성능 · 처음 자리로</span>
+  </div>
+</div>
+
+<div id="hud" class="panel"></div>
+<div id="toast" class="panel"></div>
+<div id="cross"></div>
+<!-- (deploy 10-05) 출처 페이지 링크. WHY 오른쪽 아래 고정: 시작 카드 안에 두면 클릭이 포인터 잠금(시작)으로
+     먹히고, 도움말 패널은 몇 초 뒤 사라지므로 항상 보이는 작은 링크로 둔다. 잠금 중엔 Esc로 풀고 누르면 된다. -->
+<a id="credits" href="credits.html" target="_blank" rel="noopener">출처</a>
+
+<!-- onerror: fires when main.js or anything it imports (three.js from the CDN) fails to download.
+     WHY: a failed module import throws before main.js runs a single line, so without this the
+     loading screen sat at '준비 중…' forever with no hint (offline, CDN blocked). -->
+<script type="module" src="js/main.js" onerror="
+  document.getElementById('loading').classList.add('error');
+  document.querySelector('#loading h1').textContent = '열 수 없어요';
+  document.querySelector('#loading p').textContent = '';
+  document.getElementById('loadMsg').textContent = '프로그램 파일을 받지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.';
+"></script>
+</body>
+</html>
