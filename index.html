@@ -97,46 +97,24 @@
     box-sizing: border-box; text-align: center; }
   body.mobile #hud { top: calc(68px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right)); }
   body.mobile #credits { right: auto; bottom: auto; left: calc(10px + env(safe-area-inset-left));
-    top: calc(12px + env(safe-area-inset-top)); padding: 12px 10px; line-height: 20px; min-width: 44px;
-    box-sizing: border-box; text-align: center; }
+    top: calc(12px + env(safe-area-inset-top)); }
 
   #touchUI { display: none; }
   body.mobile #touchUI.on { display: block; }
   #touchUI .ctl { position: fixed; z-index: 11; touch-action: none; -webkit-user-select: none; user-select: none; }
-  /* joystick: 136 px ring (a thumb is ~45-57 px wide), knob 56 px; the knob travels 46 px (touch.js) */
-  #stick { left: calc(18px + env(safe-area-inset-left)); bottom: calc(22px + env(safe-area-inset-bottom));
-    width: 136px; height: 136px; border-radius: 50%; display: grid; place-items: center;
-    background: rgba(6, 30, 36, .26); border: 2px solid rgba(238, 247, 247, .38); box-sizing: border-box; }
-  #stick .knob { width: 56px; height: 56px; border-radius: 50%; background: rgba(238, 247, 247, .55);
-    box-shadow: 0 1px 6px rgba(0, 0, 0, .25); pointer-events: none; }
-  #stick.on { background: rgba(6, 30, 36, .36); }
-  #stick.on .knob { background: rgba(238, 247, 247, .8); }
-  #stick.fast { border-color: var(--accent); }
-  #stick.fast .knob { background: var(--accent); }
-  /* 위로 / 아래로: 64 px round buttons stacked at the bottom-right, held to rise / sink */
-  .vbtn { right: calc(18px + env(safe-area-inset-right)); width: 64px; height: 64px; border-radius: 50%;
-    border: 2px solid rgba(238, 247, 247, .38); background: rgba(6, 30, 36, .3); color: var(--fg);
-    font-family: inherit; font-weight: 600; font-size: 12px; line-height: 1.1; display: grid; place-items: center; align-content: center; gap: 2px; padding: 0; }
-  .vbtn svg { width: 20px; height: 20px; }
-  #tUp { bottom: calc(100px + env(safe-area-inset-bottom)); }
-  #tDown { bottom: calc(22px + env(safe-area-inset-bottom)); }
-  .vbtn.on { background: rgba(255, 207, 58, .55); border-color: var(--accent); color: #102a30; }
-  /* the button row: 44 px tall pills, top-right */
-  .tbar { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
-    display: flex; gap: 6px; }
-  .pill { height: 44px; min-width: 52px; padding: 0 12px; border-radius: 22px; border: 1px solid var(--line);
-    background: var(--panel); color: var(--fg); font-family: inherit; font-weight: 600; font-size: 13px; line-height: 1; -webkit-backdrop-filter: blur(6px);
-    backdrop-filter: blur(6px); }
-  .pill:active { background: rgba(6, 30, 36, .8); }
-  #tGyro[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-  .pill.dim { opacity: .5; }
+  /* (mobile-hold 10-06) 출처·정면 = 같은 모양의 작은 버튼.  유저: "출처 버튼 기준으로 크기 80%, 글자와의 여백 절반".
+     예전 출처: 높이 44(위아래 12+줄 20)·최소폭 44·좌우 여백 10 → 높이 35·최소폭 35·좌우 여백 5.  정면도 똑같이
+     (예전 정면은 44px 알약 + 좌우 12). 글자 크기는 그대로 12px(줄이면 폰에서 안 읽힘). */
+  #tFront { top: calc(12px + env(safe-area-inset-top)); right: calc(10px + env(safe-area-inset-right)); }
+  body.mobile #credits, #tFront { height: 35px; min-width: 35px; padding: 0 5px; line-height: 35px; font-size: 12px;
+    box-sizing: border-box; text-align: center; border-radius: 8px; border: 0; background: rgba(6, 30, 36, .35);
+    color: var(--dim); font-family: inherit; font-weight: 400; }
+  #tFront:active { background: rgba(6, 30, 36, .6); color: var(--fg); }
   /* landscape phone (~375-430 px tall): the toast would land on the help panel; put it at the bottom
      between the joystick and the 위로/아래로 column instead */
   @media (orientation: landscape) and (max-height: 520px) {
     body.mobile #toast { bottom: calc(24px + env(safe-area-inset-bottom)); max-width: calc(100vw - 360px); }
   }
-  /* a narrow phone in portrait: tighter pills so four fit beside the 출처 link (320 px wide phones) */
-  @media (max-width: 370px) { .pill { padding: 0 9px; min-width: 46px; font-size: 12px; } .tbar { gap: 4px; } }
 </style>
 <script type="importmap">
 {
@@ -196,17 +174,10 @@
   </div>
 </div>
 
-<!-- (mobile 10-05) phone controls, shown after the start tap on touch devices (js/touch.js) -->
+<!-- (mobile-hold 10-06) 폰 버튼은 '정면' 하나만 (조이스틱·위로/아래로·네온/자이로/처음 없앰: 화면 꾹 = 앞으로, js/touch.js).
+     출처는 아래 #credits.  둘 다 평소엔 숨김(body.ui-hidden), 화면 두 번 톡이면 나옴. -->
 <div id="touchUI">
-  <div id="stick" class="ctl" aria-label="헤엄 조이스틱"><div class="knob"></div></div>
-  <button id="tUp" class="ctl vbtn" aria-label="위로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>위로</button>
-  <button id="tDown" class="ctl vbtn" aria-label="아래로"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>아래로</button>
-  <div class="ctl tbar">
-    <button id="tNeon" class="pill">네온</button>
-    <button id="tGyro" class="pill" aria-pressed="false">자이로</button>
-    <button id="tFront" class="pill">정면</button>
-    <button id="tHome" class="pill">처음</button>
-  </div>
+  <button id="tFront" class="ctl">정면</button>
 </div>
 <div id="hud" class="panel"></div>
 <div id="toast" class="panel"></div>

@@ -18,7 +18,7 @@ import { FishSystem } from './fish.js';
 import { makeShaft, makeSnow, makeBubbles, bubbleAttrs } from './fx.js';
 import { SwimControls } from './controls.js';
 import { GyroLook } from './gyro.js';
-import { setupTouch } from './touch.js';
+import { setupTouch, HOLD_MS } from './touch.js';
 import { installGrade, makeForward, neutral } from './grade.js';
 
 const params = new URLSearchParams(location.search);
@@ -328,7 +328,8 @@ let neonTarget = params.has('neon') ? 1 : 0;
 fishUniforms.uNeon.value = neonTarget;
 waterUniforms.uNeonWater.value = neonTarget;
 // (desk-noui 10-06) 컴퓨터에서는 알림 문구도 안 띄운다 (유저: "컴퓨터에선 그냥 아예 안 뜨게").
-const toast = (msg, ms = 1400) => { if (!MOBILE) return; const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); };
+// (mobile-hold 10-06) 폰도 알림 문구 없음 (유저: "ui는 처음부터 아예 안 나오게") → 모든 기기에서 아무것도 안 띄운다.
+const toast = (msg, ms = 1400) => { return; const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); };
 let hudOn = DEBUG;
 const helpEl = $('help');
 let helpTimer = 0;
@@ -354,7 +355,8 @@ function toggleUI() {
 }
 // (desk-noui 10-06) 컴퓨터는 UI를 아예 안 띄운다(유저 요청) — 항상 ui-hidden, 더블클릭 토글도 없앰.
 // WHY 클래스로 가리기(요소 삭제 아님): 도움말·출처·HUD 코드는 폰과 공유라 그대로 두고 표시만 막는 게 안전.
-if (!MOBILE) setUIHidden(true);
+// (mobile-hold 10-06) 폰도 처음엔 숨김: 두 번 톡 하면 출처·정면 두 버튼만 나온다 (도움말·HUD 는 폰에서 안 띄움).
+setUIHidden(true);
 // 폰: 캔버스 위 '톡' 두 번.  WHY 직접 판정(dblclick 아님): 모바일 브라우저는 touch-action:none 캔버스에서
 // dblclick 을 안정적으로 보내지 않고, 화면 끌기(둘러보기)와 섞이면 안 되므로 '짧고(<300ms) 거의 안 움직인
 // (<12px) 한 손가락 톡' 두 번이 400ms·40px 안에 올 때만 센다.  조이스틱·버튼은 캔버스가 아니라 해당 안 됨
@@ -365,7 +367,8 @@ if (MOBILE) {
   const up = (e) => {
     const d = downs.get(e.pointerId); downs.delete(e.pointerId);
     if (!d || !started || downs.size) { lastTap = null; return; }            // 두 손가락이면 톡 아님
-    const isTap = e.timeStamp - d.t < 300 && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 12;
+    const isTap = e.timeStamp - d.t < HOLD_MS &&   // (mobile-hold 10-06) 꾹 누르기(헤엄)와 안 겹치게
+       Math.hypot(e.clientX - d.x, e.clientY - d.y) < 12;
     if (!isTap) { lastTap = null; return; }
     if (lastTap && e.timeStamp - lastTap.t < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
       lastTap = null; toggleUI();
@@ -405,17 +408,8 @@ if (MOBILE) {
     lastGyro = st;
   };
   touchUI = setupTouch({
-    controls,
-    onNeon: () => controls.onToggle.KeyC(),
-    onGyro: () => {
-      if (gyro.wanted && (gyro.state === 'on' || gyro.state === 'waiting')) { gyro.disable(); toast('자이로 끔 · 화면을 끌어 둘러보기', 2200); }
-      else { gyroFromButton = true; gyro.enable(); }          // inside the tap: iOS may ask again
-    },
-    onFront: () => {
-      if (gyro.active) gyro.recenter(START_YAW); else controls.turnTo(START_YAW, START_PITCH);
-      toast('정면');
-    },
-    onHome: () => controls.onToggle.KeyR(),
+    controls, canvas,
+    onFront: () => { if (gyro.active) gyro.recenter(START_YAW); else controls.turnTo(START_YAW, START_PITCH); },
   });
   // R (a phone / tablet with a keyboard) and the 처음 button: back to the start AND facing the scene; with
   // the gyro on, resetView's lookAt alone would be overwritten by the sensor on the next frame
@@ -444,6 +438,25 @@ function startMobile() {
   touchUI.show();
   keepAwake();
 }
+// (mobile-hold 10-06) 시작 카드 없이 바로 시작 (유저: "ui는 처음부터 아예 안 나오게").
+// 문제: 아이폰은 기울기 권한 창을 '사용자 터치 안에서 부른 requestPermission()' 에만 띄운다 → 카드 탭이 그 역할이었다.
+// 대신 화면의 첫 터치(touchend — iOS 가 사용자 제스처로 인정)에서 켠다. 그 전엔 화면 끌기로 둘러보기.
+// 안드로이드 등 권한이 필요 없는 곳은 바로 켠다.  화면 꺼짐 방지(wake lock)도 첫 터치 때 다시 잡는다.
+function startMobileNoCard() {
+  // iOS 만: 요즘 안드로이드 크롬도 requestPermission 함수가 있지만 묻지 않고 허락하므로 기다릴 필요 없음 (iosHint 주석과 같은 판정)
+  const iOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const needsGesture = iOS && typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+  begin();
+  touchUI.show();
+  if (!needsGesture) { gyro.enable(); keepAwake(); return; }
+  const first = () => {
+    removeEventListener('touchend', first, true); removeEventListener('click', first, true);
+    if (!gyro.wanted) gyro.enable();
+    keepAwake();
+  };
+  addEventListener('touchend', first, true);
+  addEventListener('click', first, true);
+}
 
 const startEl = $('start');
 let started = false, everLocked = false;
@@ -459,7 +472,7 @@ startEl.addEventListener('click', async () => {
 });
 canvas.addEventListener('click', () => { if (!MOBILE && !controls.locked && started) controls.lock(); });
 function begin() {
-  if (!started) { started = true; showHelp(8); }
+  if (!started) { started = true; if (!MOBILE) showHelp(8); }   // (mobile-hold 10-06) 폰은 도움말 없음
   startEl.classList.add('gone');
 }
 controls.onLockChange = (locked) => {
@@ -806,7 +819,8 @@ $('loading').classList.add('gone');
 // (desk-noui 10-06) 컴퓨터: 시작 카드 없이 바로 시작. 마우스 둘러보기는 장면 첫 클릭에 잠기며 시작된다
 // (브라우저는 사용자 클릭 없이는 포인터 잠금을 허락하지 않음 — canvas click 핸들러가 받음). 폰은 카드 유지
 // (아이폰 기울기 권한 창이 그 탭 안에서만 뜨기 때문).
-if (!DEBUG) { if (MOBILE) startEl.classList.remove('gone'); else begin(); }
+// (mobile-hold 10-06) 폰도 카드 없이 바로 (startMobileNoCard 주석)
+if (!DEBUG) { if (MOBILE) startMobileNoCard(); else begin(); }
 requestAnimationFrame((t) => { clock.last = t; clock.t0 = t; requestAnimationFrame(frame); });
 
 // ======================================================================================
