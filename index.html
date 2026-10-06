@@ -63,6 +63,14 @@
   #cross { position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 2px;
     background: rgba(255,255,255,.55); z-index: 5; display: none; }
   body.locked #cross { display: block; }
+  /* (ui-toggle 10-06) 더블클릭 / 더블탭으로 UI 숨기기 (main.js setUIHidden).  WHY opacity+visibility+pointer-events
+     (display:none 아님): 숨겨진 조이스틱·버튼이 터치를 받으면 안 되고(visibility·pointer-events), 다시 켤 때
+     touchUI 의 .on 표시 상태를 건드리지 않아야 한다.  토스트는 일부러 빼둠 — 숨길 때 '두 번 눌러 다시 보기'
+     안내가 떠야 하고, 토스트는 스스로 사라지는 일시 표시라 화면을 가리지 않는다. */
+  #help, #hud, #touchUI, #credits, #cross { transition: opacity .3s ease; }
+  body.ui-hidden #help, body.ui-hidden #hud, body.ui-hidden #touchUI, body.ui-hidden #credits, body.ui-hidden #cross {
+    opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; }
+  body.ui-hidden #touchUI * { pointer-events: none !important; }
   #credits { position: fixed; right: 12px; bottom: 10px; z-index: 11; font-size: 12px; color: var(--dim);
     text-decoration: none; padding: 2px 8px; border-radius: 8px; background: rgba(6, 30, 36, .35); }
   #credits:hover { color: var(--fg); }
@@ -173,6 +181,7 @@
     <b>화면 끌기</b><span>방향 돌리기</span>
     <b>조이스틱</b><span>헤엄 (두 번 톡 → 빠르게)</span>
     <b>위로 · 아래로</b><span>누르고 있기</span>
+    <b>화면 두 번 톡</b><span>UI 숨기기 · 다시 보기</span>
   </div>
   <div class="keys only-desk">
     <b>마우스</b><span>둘러보기 (Esc: 마우스 풀기)</span>
@@ -183,6 +192,7 @@
     <b>V</b><span>시선 방향으로 헤엄 켜기/끄기</span>
     <b>C</b><span>네온 색 ↔ 자연 색</span>
     <b>H · P · R</b><span>도움말 · 성능 · 처음 자리로</span>
+    <b>더블클릭 · U</b><span>UI 숨기기 · 다시 보기</span>
   </div>
 </div>
 

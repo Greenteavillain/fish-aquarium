@@ -338,7 +338,40 @@ controls.onToggle = {
   KeyP: () => { hudOn = !hudOn; $('hud').classList.toggle('on', hudOn); },
   KeyR: () => { resetView(); toast('처음 자리로'); },
   KeyV: () => { controls.flyAlongView = !controls.flyAlongView; toast(controls.flyAlongView ? '시선 방향으로 헤엄' : '수평으로 헤엄'); },
+  KeyU: () => toggleUI(),
 };
+
+// ---------- UI 숨기기 (ui-toggle 10-06) ----------
+// 유저 요청: 화면을 더블클릭(폰은 두 번 톡)하면 UI가 가려지고, 다시 하면 나온다 — 장면만 깨끗하게 보려고.
+// 숨는 것 = 도움말·HUD·조이스틱/버튼·출처 링크·조준점 (index.html 의 body.ui-hidden 규칙).  카메라 조작
+// (자이로·키보드·마우스 잠금·화면 끌기)은 그대로라 숨긴 채로도 둘러볼 수 있다.  U 키는 같은 동작의 키보드판.
+let uiHidden = false;
+function setUIHidden(h) { uiHidden = h; document.body.classList.toggle('ui-hidden', h); }
+function toggleUI() {
+  setUIHidden(!uiHidden);
+  if (uiHidden) toast(MOBILE ? '두 번 톡 하면 다시 보여요' : '더블클릭(U)하면 다시 보여요', 1800);
+}
+// 데스크톱: 캔버스 더블클릭.  포인터 잠금 중에도 잠긴 요소(캔버스)로 dblclick 이 온다.  시작 전(카드 위)은 제외.
+canvas.addEventListener('dblclick', (e) => { if (!MOBILE && started) { e.preventDefault(); toggleUI(); } });
+// 폰: 캔버스 위 '톡' 두 번.  WHY 직접 판정(dblclick 아님): 모바일 브라우저는 touch-action:none 캔버스에서
+// dblclick 을 안정적으로 보내지 않고, 화면 끌기(둘러보기)와 섞이면 안 되므로 '짧고(<300ms) 거의 안 움직인
+// (<12px) 한 손가락 톡' 두 번이 400ms·40px 안에 올 때만 센다.  조이스틱·버튼은 캔버스가 아니라 해당 안 됨
+// (조이스틱 두 번 톡=빠르게 헤엄과 안 겹침).
+if (MOBILE) {
+  const downs = new Map(); let lastTap = null;
+  canvas.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') downs.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp }); });
+  const up = (e) => {
+    const d = downs.get(e.pointerId); downs.delete(e.pointerId);
+    if (!d || !started || downs.size) { lastTap = null; return; }            // 두 손가락이면 톡 아님
+    const isTap = e.timeStamp - d.t < 300 && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 12;
+    if (!isTap) { lastTap = null; return; }
+    if (lastTap && e.timeStamp - lastTap.t < 400 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
+      lastTap = null; toggleUI();
+    } else lastTap = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+  };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', (e) => { downs.delete(e.pointerId); lastTap = null; });
+}
 $('hud').classList.toggle('on', hudOn);
 
 // ---------- phone mode (mobile 10-05) ----------
