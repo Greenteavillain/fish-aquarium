@@ -327,7 +327,8 @@ const START_YAW = controls.yaw, START_PITCH = controls.pitch;     // '정면' on
 let neonTarget = params.has('neon') ? 1 : 0;
 fishUniforms.uNeon.value = neonTarget;
 waterUniforms.uNeonWater.value = neonTarget;
-const toast = (msg, ms = 1400) => { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); };
+// (desk-noui 10-06) 컴퓨터에서는 알림 문구도 안 띄운다 (유저: "컴퓨터에선 그냥 아예 안 뜨게").
+const toast = (msg, ms = 1400) => { if (!MOBILE) return; const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove('on'), ms); };
 let hudOn = DEBUG;
 const helpEl = $('help');
 let helpTimer = 0;
@@ -338,7 +339,7 @@ controls.onToggle = {
   KeyP: () => { hudOn = !hudOn; $('hud').classList.toggle('on', hudOn); },
   KeyR: () => { resetView(); toast('처음 자리로'); },
   KeyV: () => { controls.flyAlongView = !controls.flyAlongView; toast(controls.flyAlongView ? '시선 방향으로 헤엄' : '수평으로 헤엄'); },
-  KeyU: () => toggleUI(),
+  ...(MOBILE ? { KeyU: () => toggleUI() } : {}),   // (desk-noui 10-06) 컴퓨터는 UI가 아예 없어서 토글도 없음
 };
 
 // ---------- UI 숨기기 (ui-toggle 10-06) ----------
@@ -351,8 +352,9 @@ function toggleUI() {
   setUIHidden(!uiHidden);
   if (uiHidden) toast(MOBILE ? '두 번 톡 하면 다시 보여요' : '더블클릭(U)하면 다시 보여요', 1800);
 }
-// 데스크톱: 캔버스 더블클릭.  포인터 잠금 중에도 잠긴 요소(캔버스)로 dblclick 이 온다.  시작 전(카드 위)은 제외.
-canvas.addEventListener('dblclick', (e) => { if (!MOBILE && started) { e.preventDefault(); toggleUI(); } });
+// (desk-noui 10-06) 컴퓨터는 UI를 아예 안 띄운다(유저 요청) — 항상 ui-hidden, 더블클릭 토글도 없앰.
+// WHY 클래스로 가리기(요소 삭제 아님): 도움말·출처·HUD 코드는 폰과 공유라 그대로 두고 표시만 막는 게 안전.
+if (!MOBILE) setUIHidden(true);
 // 폰: 캔버스 위 '톡' 두 번.  WHY 직접 판정(dblclick 아님): 모바일 브라우저는 touch-action:none 캔버스에서
 // dblclick 을 안정적으로 보내지 않고, 화면 끌기(둘러보기)와 섞이면 안 되므로 '짧고(<300ms) 거의 안 움직인
 // (<12px) 한 손가락 톡' 두 번이 400ms·40px 안에 올 때만 센다.  조이스틱·버튼은 캔버스가 아니라 해당 안 됨
@@ -463,7 +465,8 @@ function begin() {
 controls.onLockChange = (locked) => {
   document.body.classList.toggle('locked', locked);
   if (locked) { everLocked = true; begin(); }
-  else if (started && !DEBUG) { startEl.classList.remove('gone'); startEl.querySelector('.go').textContent = '클릭해서 계속'; }
+  // (desk-noui 10-06) 컴퓨터는 Esc 뒤에도 '클릭해서 계속' 카드를 안 띄움 — 장면을 다시 클릭하면 잠긴다(canvas click).
+  else if (started && !DEBUG && MOBILE) { startEl.classList.remove('gone'); startEl.querySelector('.go').textContent = '클릭해서 계속'; }
 };
 if (DEBUG) { begin(); if (MOBILE) startMobile(); }
 
@@ -800,7 +803,10 @@ $('loadMsg').textContent = '셰이더 준비 중…';
 for (const pair of fish.meshes) for (const m of pair) if (m) m.visible = true;
 try { await renderer.compileAsync(scene, camera); } catch (e) { console.warn('compileAsync', e); }
 $('loading').classList.add('gone');
-if (!DEBUG) startEl.classList.remove('gone');
+// (desk-noui 10-06) 컴퓨터: 시작 카드 없이 바로 시작. 마우스 둘러보기는 장면 첫 클릭에 잠기며 시작된다
+// (브라우저는 사용자 클릭 없이는 포인터 잠금을 허락하지 않음 — canvas click 핸들러가 받음). 폰은 카드 유지
+// (아이폰 기울기 권한 창이 그 탭 안에서만 뜨기 때문).
+if (!DEBUG) { if (MOBILE) startEl.classList.remove('gone'); else begin(); }
 requestAnimationFrame((t) => { clock.last = t; clock.t0 = t; requestAnimationFrame(frame); });
 
 // ======================================================================================
